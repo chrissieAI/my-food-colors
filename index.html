@@ -115,6 +115,27 @@ a{color:var(--ac)}
 .adet{padding:10px;background:#f6f7f4;border-radius:10px;margin:6px 0 10px}
 .pill{flex:0 0 auto;font-size:11px;font-weight:800;text-transform:uppercase;border-radius:6px;padding:4px 7px;color:#fff;min-width:56px;text-align:center}
 .pill.green{background:var(--g)}.pill.yellow{background:var(--y);color:#3a2f00}.pill.orange{background:var(--o)}.pill.none{background:var(--n)}
+/* barcode scanner */
+.scan{position:fixed;inset:0;z-index:300;background:#000;display:none;color:#fff;overflow:hidden}
+.scan.on{display:block}
+.scan video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.scan .vfwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.scan .vf{width:min(82vw,360px);height:min(34vh,190px);border-radius:14px;box-shadow:0 0 0 200vmax rgba(0,0,0,.5);position:relative;
+  background:linear-gradient(#fff,#fff) top left/26px 4px,linear-gradient(#fff,#fff) top left/4px 26px,linear-gradient(#fff,#fff) top right/26px 4px,linear-gradient(#fff,#fff) top right/4px 26px,
+  linear-gradient(#fff,#fff) bottom left/26px 4px,linear-gradient(#fff,#fff) bottom left/4px 26px,linear-gradient(#fff,#fff) bottom right/26px 4px,linear-gradient(#fff,#fff) bottom right/4px 26px;background-repeat:no-repeat}
+.scan .vf i{position:absolute;left:8%;right:8%;top:50%;height:2px;background:#ff5a4f;box-shadow:0 0 8px #ff5a4f;animation:scanln 1.8s ease-in-out infinite}
+@keyframes scanln{0%,100%{top:18%}50%{top:82%}}
+.scan .stop{position:absolute;left:0;right:0;top:0;padding:calc(14px + env(safe-area-inset-top)) 16px 10px;text-align:center;background:linear-gradient(rgba(0,0,0,.65),transparent)}
+.scan .stop b{font-size:18px;display:block}
+.scan #scanMsg{display:block;margin-top:4px;font-size:15px;line-height:1.35}
+.scan #scanMsg.bad{background:#fff;color:#a12b1f;border-radius:10px;padding:10px 12px;text-align:left}
+.scan .sbot{position:absolute;left:0;right:0;bottom:0;padding:12px 16px calc(16px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.75))}
+.scan .sbot .row{justify-content:center}
+.scan .sbot .btn{min-width:96px}
+.scan #scanType{display:none;margin-bottom:10px}
+.scan #scanType.on{display:flex}
+.scan #scanDigits{flex:1;min-width:0;font-size:18px;letter-spacing:1px}
+.scanbtn{white-space:nowrap}
 </style>
 </head>
 <body>
@@ -135,8 +156,9 @@ a{color:var(--ac)}
     </div>
     <div class="row" style="margin-top:8px">
       <input id="bc" type="text" inputmode="numeric" class="grow" placeholder="Or type a barcode number (UPC/EAN)" autocomplete="off">
-      <button class="btn" id="bcGo">Barcode</button>
+      <button class="btn" id="bcGo">Look up</button>
     </div>
+    <div class="row" style="margin-top:8px"><button class="btn scanbtn" id="scanLookup" style="width:100%">📷 Scan barcode</button></div>
   </div>
   <div id="status"></div>
   <div id="results"></div>
@@ -305,6 +327,15 @@ a{color:var(--ac)}
 </nav>
 <div class="sheet" id="sheet"><div class="pane" id="sheetPane"></div></div>
 <div class="toast" id="toast"></div>
+<div class="scan" id="scan" role="dialog" aria-modal="true" aria-label="Scan a barcode">
+  <video id="scanVideo" playsinline muted autoplay></video>
+  <div class="vfwrap"><div class="vf"><i></i></div></div>
+  <div class="stop"><b>Scan a barcode</b><span id="scanMsg">Starting camera…</span></div>
+  <div class="sbot">
+    <div class="row" id="scanType"><input id="scanDigits" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="Barcode digits" autocomplete="off"><button class="btn pri" id="scanLook">Look up</button></div>
+    <div class="row"><button class="btn" id="scanTorch" hidden>🔦 Light</button><button class="btn" id="scanTypeBtn">⌨️ Type digits</button><button class="btn pri" id="scanCancel">Cancel</button></div>
+  </div>
+</div>
 
 <script>
 // BEGIN CLASSIFIER
@@ -458,7 +489,7 @@ document.querySelectorAll('nav button').forEach(function (b) {
 function usdaKey() { return (LS.get('apiKey', '') || '').trim() || 'DEMO_KEY'; }
 // BEGIN SEARCH-CORE
 function rewriteQuery(q) {
-  var s = ' ' + q.toLowerCase().replace(/coca[- ]cola/g, 'cola') + ' ';
+  var s = ' ' + q.toLowerCase().replace(/coca[- ]cola/g, 'cola').replace(/\bnon[- ]fat\b/g, 'nonfat') + ' ';
   s = s.replace(/\b(coke|pepsi)\b/g, 'cola');
   if (/\b(cola|soda|pop|soft drink)\b/.test(s)) {
     s = s.replace(/\bzero( sugar)?\b|\bsugar[- ]free\b|\bno sugar\b/g, ' diet ');
@@ -468,16 +499,28 @@ function rewriteQuery(q) {
   return s.replace(/\s+/g, ' ').trim();
 }
 function tokens(s) {
-  return s.toLowerCase().split(/[^a-z0-9%]+/).filter(function (w) { return w && !/^(and|or|the|a|of|with|in|regular|plain)$/.test(w); })
+  return s.toLowerCase().replace(/\bnon[- ]fat\b/g, 'nonfat').replace(/\blow[- ]fat\b/g, 'lowfat').split(/[^a-z0-9%]+/).filter(function (w) { return w && !/^(and|or|the|a|of|with|in|regular|plain)$/.test(w); })
     .map(function (w) { return w.length > 3 ? w.replace(/(es|s)$/, '') : w; });
+}
+// query token t matches description word w: prefix match, or one typo for words of 5+ letters ("togurt" ~ "yogurt")
+function tokMatch(t, w) {
+  if (w.indexOf(t) === 0) return true;
+  if (t.length < 5 || Math.abs(t.length - w.length) > 1) return false;
+  var i = 0, j = 0, e = 0;
+  while (i < t.length && j < w.length) {
+    if (t[i] === w[j]) { i++; j++; continue; }
+    if (++e > 1) return false;
+    if (t.length > w.length) i++; else if (w.length > t.length) j++; else { i++; j++; }
+  }
+  return e + (t.length - i) + (w.length - j) <= 1;
 }
 function scoreDesc(desc, qt, dataType) {
   var d = desc.toLowerCase(), first = d.split(',')[0];
   var dt = tokens(d), ft = tokens(first);
-  var hit = 0; qt.forEach(function (t) { if (dt.some(function (w) { return w.indexOf(t) === 0; })) hit++; });
+  var hit = 0; qt.forEach(function (t) { if (dt.some(function (w) { return tokMatch(t, w); })) hit++; });
   var s = qt.length ? hit / qt.length : 0;
-  if (qt.some(function (t) { return ft.some(function (w) { return w.indexOf(t) === 0; }); })) s += 0.3;
-  if (ft.length && ft.every(function (w) { return qt.some(function (t) { return w.indexOf(t) === 0; }); })) s += 0.25;
+  if (qt.some(function (t) { return ft.some(function (w) { return tokMatch(t, w); }); })) s += 0.3;
+  if (ft.length && ft.every(function (w) { return qt.some(function (t) { return tokMatch(t, w); }); })) s += 0.25;
   if (/(, raw\b|\bnfs\b|no added fat|ns as to|\bplain\b)/.test(d)) s += 0.15;
   if (/(skinless|skin not eaten)/.test(d)) s += 0.05;
   if (/(as ingredient|baby food|infant formula|toddler)/.test(d)) s -= 0.6;
@@ -506,29 +549,55 @@ function normUsda(f) {
           tags: [], kcal100: k, fat100: fat, p100: nutr(fn, [1003]), c100: nutr(fn, [1005, 1050]), measures: measures, estimated: est, unit: 'g'};
 }
 // END SEARCH-CORE
-async function fetchRetry(url, tries) {
+// Retries network errors, HTTP 400 (USDA's gateway sometimes answers a valid request with a bare 400) and 5xx.
+// 429 (rate limit), 403 (bad key) and 404 are returned at once.
+async function fetchRetry(url, tries, opts) {
   var last;
   for (var i = 0; i < tries; i++) {
     try {
-      var r = await fetch(url);
+      var r = await fetch(url, opts);
       if (r.ok) return r;
       last = r;
-      if (r.status === 429 || r.status === 403) return r;
+      if (r.status === 429 || r.status === 403 || r.status === 404) return r;
+      if (!(r.status === 400 || r.status === 408 || r.status >= 500)) return r;
     } catch (e) { last = e; }
-    await new Promise(function (res) { setTimeout(res, 700 * (i + 1)); });
+    if (i < tries - 1) await new Promise(function (res) { setTimeout(res, 600 * (i + 1)); });
   }
   if (last instanceof Response) return last;
   throw last;
 }
+var usdaStats = {post: 0, postFail: 0, getFallback: 0, getFail: 0};
+// USDA FoodData Central search: POST with a JSON body; if that keeps failing, GET without the dataType
+// parameter and filter data types here. Throws RATE / KEY / HICCUP.
+async function usdaSearch(query, dataTypes, pageSize) {
+  var base = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + encodeURIComponent(usdaKey());
+  var r = null;
+  usdaStats.post++;
+  try {
+    r = await fetchRetry(base, 3, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({query: query, dataType: dataTypes, pageSize: pageSize})});
+  } catch (e) { r = null; }
+  if (r && r.status === 429) throw new Error('RATE');
+  if (r && r.status === 403) throw new Error('KEY');
+  if (r && r.ok) { try { return await r.json(); } catch (e) {} }
+  usdaStats.postFail++; usdaStats.getFallback++;
+  var r2 = null;
+  try { r2 = await fetchRetry(base + '&query=' + encodeURIComponent(query) + '&pageSize=' + Math.min(200, Math.max(pageSize, 100)), 2); } catch (e) { r2 = null; }
+  if (r2 && r2.status === 429) throw new Error('RATE');
+  if (r2 && r2.status === 403) throw new Error('KEY');
+  var j = null;
+  if (r2 && r2.ok) { try { j = await r2.json(); } catch (e) {} }
+  if (!j) { usdaStats.getFail++; throw new Error('HICCUP'); }
+  j.foods = (j.foods || []).filter(function (f) { return dataTypes.indexOf(f.dataType) >= 0; }).slice(0, pageSize);
+  return j;
+}
 async function searchUsda(q) {
-  var rq = rewriteQuery(q);
-  var url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + encodeURIComponent(usdaKey()) +
-    '&query=' + encodeURIComponent(rq) + '&dataType=' + encodeURIComponent('Survey (FNDDS),SR Legacy,Foundation') + '&pageSize=40';
-  var r = await fetchRetry(url, 3);
-  if (r.status === 429) throw new Error('RATE');
-  if (r.status === 403) throw new Error('KEY');
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  var j = await r.json();
+  var rq = rewriteQuery(q), GEN = ['Survey (FNDDS)', 'SR Legacy', 'Foundation'];
+  var j = await usdaSearch(rq, GEN, 40);
+  if (!(j.foods || []).length) {   // nothing found: try once more without short words ("non fat greek togurt" -> "greek togurt")
+    var sq = rq.split(' ').filter(function (w) { return w.length >= 3; }).join(' ');
+    if (sq && sq !== rq) { j = await usdaSearch(sq, GEN, 40); rq = sq; }
+  }
   var qt = tokens(rq);
   var items = (j.foods || []).map(function (f, i) { var n = normUsda(f); n._s = scoreDesc(f.description, qt, f.dataType) - i * 0.0005; return n; })
     .filter(function (x) { return x.kcal100 != null; });
@@ -572,13 +641,7 @@ function normBranded(f) {
   return n;
 }
 async function searchBranded(q) {
-  var url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + encodeURIComponent(usdaKey()) +
-    '&query=' + encodeURIComponent(q) + '&dataType=Branded&pageSize=25';
-  var r = await fetchRetry(url, 3);
-  if (r.status === 429) throw new Error('RATE');
-  if (r.status === 403) throw new Error('KEY');
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  var j = await r.json();
+  var j = await usdaSearch(q, ['Branded'], 25);
   var qt = tokens(q);
   var items = (j.foods || []).map(function (f, i) { var n = normBranded(f); n._s = scoreDesc((n.brand + ' ' + f.description), qt, 'Branded') - i * 0.001; return n; })
     .filter(function (x) { return x.kcal100 != null; });
@@ -591,10 +654,8 @@ async function searchBranded(q) {
   return out.slice(0, 10);
 }
 async function searchBarcodeUsda(code) {
-  var url = 'https://api.nal.usda.gov/fdc/v1/foods/search?api_key=' + encodeURIComponent(usdaKey()) + '&query=' + encodeURIComponent(code) + '&dataType=Branded&pageSize=5';
-  var r = await fetchRetry(url, 2);
-  if (!r.ok) return [];
-  var j = await r.json();
+  var j;
+  try { j = await usdaSearch(code, ['Branded'], 5); } catch (e) { return []; }
   return (j.foods || []).filter(function (f) { return String(f.gtinUpc || '').replace(/^0+/, '') === code.replace(/^0+/, ''); }).map(normBranded).filter(function (x) { return x.kcal100 != null; });
 }
 
@@ -699,7 +760,8 @@ function errMsg(e, who) {
   var m = String(e && e.message);
   return m === 'RATE' ? 'The shared USDA demo key is busy (rate limit). Try again in a few minutes, or add your free key under Targets → USDA data key.'
        : m === 'KEY' ? 'The USDA key was rejected. Check it under Targets → USDA data key.'
-       : 'Couldn\'t reach ' + who + ' (' + esc(m) + '). Try again.';
+       : /^USDA/.test(who) ? 'USDA search hiccup, tap Search to try again.'
+       : 'Couldn\'t reach ' + who + '. Tap Search to try again.';
 }
 function showResults(groups, msgs) {
   current = {}; overrides = {};
@@ -733,17 +795,184 @@ async function doSearch() {
     {title: 'Brand-name products · USDA', items: res[1].status === 'fulfilled' ? res[1].value : []}
   ], msgs);
 }
+// ---------- barcodes ----------
+// GTIN check digit (EAN-8, UPC-A, EAN-13, GTIN-14)
+function gtinOk(d) {
+  if (!/^(\d{8}|\d{12,14})$/.test(d)) return false;
+  var n = d.length, s = 0;
+  for (var i = 0; i < n - 1; i++) s += +d[n - 2 - i] * (i % 2 === 0 ? 3 : 1);
+  return (10 - s % 10) % 10 === +d[n - 1];
+}
+// UPC-E (8 digits incl. number system and check digit) -> UPC-A (12 digits)
+function upcEtoA(e) {
+  if (!/^[01]\d{7}$/.test(e)) return null;
+  var d = e.slice(1, 7), m = d[5], b;
+  if (m <= '2') b = d[0] + d[1] + m + '0000' + d[2] + d[3] + d[4];
+  else if (m === '3') b = d[0] + d[1] + d[2] + '00000' + d[3] + d[4];
+  else if (m === '4') b = d[0] + d[1] + d[2] + d[3] + '00000' + d[4];
+  else b = d.slice(0, 5) + '0000' + m;
+  return e[0] + b + e[7];
+}
+// all spellings worth trying for one code (UPC-E expanded, UPC-A <-> EAN-13 with leading 0)
+function barcodeForms(code) {
+  var out = [code], a = code.length === 8 ? upcEtoA(code) : null;
+  if (a && gtinOk(a)) out.push(a, '0' + a);
+  if (code.length === 12) out.push('0' + code);
+  if (code.length === 13 && code[0] === '0') out.push(code.slice(1));
+  return out.filter(function (x, i) { return out.indexOf(x) === i; });
+}
+// Open Food Facts first, then USDA brand-name foods. Returns {items, msgs}.
+async function lookupBarcode(code) {
+  var forms = barcodeForms(code), items = [], msgs = [], offDown = false;
+  for (var i = 0; i < forms.length && !items.length; i++) {
+    try { items = await cached('bc:' + forms[i], (function (c) { return function () { return productOff(c); }; })(forms[i])); } catch (e) { offDown = true; break; }
+  }
+  if (!items.length) {
+    var uq = code.length === 8 && forms[1] && forms[1].length === 12 ? forms[1] : code;
+    try { items = await searchBarcodeUsda(uq); } catch (e) {}
+  }
+  if (!items.length) msgs.push(offDown ? 'Couldn\'t reach Open Food Facts right now, and USDA had no match. Try again, or use the Label tab.'
+                                      : 'Barcode ' + esc(code) + ' wasn\'t found. Use the Label tab with the numbers from the package.');
+  return {items: items, msgs: msgs};
+}
 async function doBarcode() {
   var code = $('bc').value.replace(/\D/g, ''); if (code.length < 6) { alert('Type the digits under the barcode.'); return; }
   $('bc').blur();
   $('status').innerHTML = '<div class="card"><span class="spin"></span> Looking up barcode…</div>';
   $('results').innerHTML = '';
-  var items = [], msgs = [];
-  try { items = await cached('bc:' + code, function () { return productOff(code); }); } catch (e) { msgs.push('Couldn\'t reach Open Food Facts right now.'); }
-  if (!items.length) { try { items = await searchBarcodeUsda(code); } catch (e) {} }
-  if (!items.length && !msgs.length) msgs.push('Barcode not found. Use the Label tab with the numbers from the package.');
-  showResults([{title: 'Barcode ' + esc(code), items: items}], msgs);
+  var r = await lookupBarcode(code);
+  showResults([{title: 'Barcode ' + esc(code), items: r.items}], r.msgs);
 }
+
+// ---------- camera scanner ----------
+// Uses the browser's own BarcodeDetector when it supports these formats (Android Chrome, macOS).
+// Otherwise (iPhone Safari/Chrome, Windows/Linux) it lazy-loads the ZXing-based "barcode-detector"
+// ponyfill, pinned, from jsDelivr, only when the scanner is first opened.
+var SCAN_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e'];
+var BD_URL = 'https://cdn.jsdelivr.net/npm/barcode-detector@3.2.3/dist/es/ponyfill.js'; // pulls zxing-wasm@3.1.6 (pinned inside)
+var scan = {on: false, stream: null, timer: 0, cb: null, busy: false, torch: false, det: null, src: '', hold: false};
+var detPromise = null;
+function getDetector() {
+  if (!detPromise) {
+    detPromise = (async function () {
+      var blank = document.createElement('canvas'); blank.width = blank.height = 16;
+      if ('BarcodeDetector' in window) {
+        try {
+          var f = await window.BarcodeDetector.getSupportedFormats();
+          if (SCAN_FORMATS.every(function (x) { return f.indexOf(x) >= 0; })) {
+            var nd = new window.BarcodeDetector({formats: SCAN_FORMATS});
+            await nd.detect(blank);              // some builds list formats but have no detection service
+            scan.src = 'native'; return nd;
+          }
+        } catch (e) {}
+      }
+      var m = await import(BD_URL);
+      var det = new m.BarcodeDetector({formats: SCAN_FORMATS});
+      try { await det.detect(blank); }          // warm up: downloads and compiles the WebAssembly reader
+      catch (e) {                               // one retry, fetching the .wasm from the other jsDelivr host
+        if (m.purgeZXingModule) m.purgeZXingModule();
+        if (m.setZXingModuleOverrides) m.setZXingModuleOverrides({locateFile: function (p) { return /\.wasm$/.test(p) ? 'https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.6/dist/reader/' + p : p; }});
+        det = new m.BarcodeDetector({formats: SCAN_FORMATS});
+        await det.detect(blank);
+      }
+      scan.src = 'zxing';
+      return det;
+    })();
+    detPromise.catch(function () { detPromise = null; });   // allow a retry after a failed download
+  }
+  return detPromise;
+}
+function validScan(b) {
+  var code = String(b && b.rawValue || '').replace(/\D/g, '');
+  if (b.format && SCAN_FORMATS.indexOf(b.format) < 0) return null;
+  if (b.format === 'upc_e' && code.length === 8) { var a = upcEtoA(code); return a && gtinOk(a) ? code : null; }  // ZXing reports UPC-E already expanded
+  return gtinOk(code) ? code : null;
+}
+function scanMsg(t, bad) { var m = $('scanMsg'); m.textContent = t; m.className = bad ? 'bad' : ''; }
+function stopCamera() {
+  clearTimeout(scan.timer); scan.timer = 0;
+  if (scan.stream) scan.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+  scan.stream = null; scan.torch = false;
+  var v = $('scanVideo'); try { v.pause(); } catch (e) {} v.srcObject = null;
+  $('scanTorch').hidden = true; $('scanTorch').textContent = '🔦 Light';
+}
+function camErr(e) {
+  var n = e && e.name;
+  if (n === 'NotAllowedError' || n === 'SecurityError' || n === 'PermissionDeniedError')
+    return 'Camera access is blocked for this page. To scan, allow the camera: on iPhone Safari tap “aA” → Website Settings → Camera → Allow (Chrome: iPhone Settings → Chrome → Camera). Or type the digits under the barcode below.';
+  if (n === 'NotFoundError' || n === 'OverconstrainedError' || n === 'DevicesNotFoundError') return 'No camera was found. Type the digits under the barcode below.';
+  if (n === 'NotReadableError' || n === 'TrackStartError') return 'The camera is in use by another app. Close it and try again, or type the digits below.';
+  return 'Couldn\'t start the camera. Type the digits under the barcode below.';
+}
+function scanFail(msg) { stopCamera(); scanMsg(msg, true); $('scanType').classList.add('on'); }
+async function openScanner(cb) {
+  scan.cb = cb; scan.on = true; scan.busy = false;
+  $('scanDigits').value = ''; $('scanType').classList.remove('on'); $('scanTorch').hidden = true;
+  scanMsg('Starting camera…'); $('scan').classList.add('on'); document.body.style.overflow = 'hidden';
+  var detP = getDetector(); detP.catch(function () {});
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    scanFail('The camera isn\'t available here (open the app from its https:// address in Safari or Chrome). Type the digits under the barcode below.'); return;
+  }
+  var stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}}});
+  } catch (e) { if (scan.on) scanFail(camErr(e)); return; }
+  if (!scan.on) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
+  scan.stream = stream;
+  var v = $('scanVideo'); v.setAttribute('playsinline', ''); v.muted = true; v.srcObject = stream;
+  try { await v.play(); } catch (e) {}
+  var track = stream.getVideoTracks()[0], caps = track && track.getCapabilities ? track.getCapabilities() : {};
+  if (caps && caps.torch) $('scanTorch').hidden = false;
+  scanMsg('Loading the barcode reader…');
+  var det;
+  try { det = await detP; } catch (e) { if (scan.on) scanFail('Couldn\'t load the barcode reader (offline?). Type the digits under the barcode below.'); return; }
+  if (!scan.on || scan.stream !== stream) return;
+  scan.det = det;
+  scanMsg('Line up the barcode inside the box. Hold steady, about a hand’s length away.');
+  scanTick();
+}
+function scanTick() {
+  if (!scan.on || !scan.stream) return;
+  var v = $('scanVideo');
+  if (!scan.hold && !scan.busy && v.readyState >= 2 && v.videoWidth) {
+    scan.busy = true;
+    scan.det.detect(v).then(function (bs) {
+      scan.busy = false;
+      if (!scan.on) return;
+      for (var i = 0; i < (bs || []).length; i++) { var c = validScan(bs[i]); if (c) { scanDone(c); return; } }
+    }, function () { scan.busy = false; });
+  }
+  scan.timer = setTimeout(scanTick, 120);
+}
+function scanDone(code) {
+  if (navigator.vibrate) { try { navigator.vibrate(80); } catch (e) {} }
+  var cb = scan.cb; closeScanner();
+  if (cb) cb(code);
+}
+function closeScanner() {
+  scan.on = false; scan.cb = null; stopCamera();
+  $('scan').classList.remove('on'); document.body.style.overflow = '';
+}
+function scanTyped() {
+  var code = $('scanDigits').value.replace(/\D/g, '');
+  if (code.length < 6) { scanMsg('Type all the digits under the barcode (8, 12 or 13 digits).', true); $('scanDigits').focus(); return; }
+  var cb = scan.cb; closeScanner(); if (cb) cb(code);
+}
+$('scanCancel').addEventListener('click', closeScanner);
+$('scanTypeBtn').addEventListener('click', function () { $('scanType').classList.add('on'); $('scanDigits').focus(); });
+$('scanLook').addEventListener('click', scanTyped);
+$('scanDigits').addEventListener('keydown', function (e) { if (e.key === 'Enter') scanTyped(); });
+$('scanTorch').addEventListener('click', function () {
+  var t = scan.stream && scan.stream.getVideoTracks()[0]; if (!t) return;
+  scan.torch = !scan.torch;
+  t.applyConstraints({advanced: [{torch: scan.torch}]}).catch(function () { scan.torch = false; $('scanTorch').hidden = true; });
+  $('scanTorch').textContent = scan.torch ? '🔦 Light off' : '🔦 Light';
+});
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && scan.on) closeScanner(); });
+document.addEventListener('visibilitychange', function () { if (document.hidden && scan.on) closeScanner(); });
+$('scanLookup').addEventListener('click', function () {
+  openScanner(function (code) { $('bc').value = code; doBarcode(); });
+});
 $('bcGo').addEventListener('click', doBarcode);
 $('bc').addEventListener('keydown', function (e) { if (e.key === 'Enter') doBarcode(); });
 $('useBrand').checked = LS.get('useBrand', !!LS.get('apiKey', ''));
@@ -1208,7 +1437,8 @@ function portionHtml(unit, g0, measures, act) {
 }
 function addSearchHtml() {
   var c = addCtx, hasKey = !!(LS.get('apiKey', '') || '').trim();
-  var h = '<div class="row" style="margin-top:6px"><input id="aq" type="search" class="grow" placeholder="Search a food, e.g. oatmeal" value="' + esc(av('aq')) + '" enterkeyhint="search" autocomplete="off"><button class="btn pri" data-aact="search">Search</button></div>';
+  var h = '<div class="row" style="margin-top:6px"><input id="aq" type="search" class="grow" placeholder="Search a food, e.g. oatmeal" value="' + esc(av('aq')) + '" enterkeyhint="search" autocomplete="off"><button class="btn pri" data-aact="search">Search</button></div>' +
+    '<div class="row" style="margin-top:6px"><button class="btn scanbtn" data-aact="scan" style="width:100%">📷 Scan barcode</button></div>';
   if (!hasKey) h += '<div class="muted" style="margin-top:4px">Tip: add your free USDA key under Targets for unlimited searches.</div>';
   if (c.busy) h += '<div style="margin-top:12px"><span class="spin"></span> Searching…</div>';
   if (c.msg) h += '<div class="err" style="margin-top:10px">' + c.msg + '</div>';
@@ -1291,6 +1521,13 @@ function finishAdd(msg) { var sec = addCtx.sec; closeSheet(); renderToday(); toa
 async function addSearch() {
   var q = ($('aq').value || '').trim(); if (!q) { $('aq').focus(); return; }
   var c = addCtx; c.v.aq = q; c.busy = true; c.msg = ''; c.foods = []; c.open = -1; renderAdd();
+  if (/^\d{8,14}$/.test(q.replace(/\s/g, ''))) {   // barcode digits (typed or scanned)
+    var bres = await lookupBarcode(q.replace(/\s/g, ''));
+    if (addCtx !== c) return;
+    c.busy = false; c.foods = bres.items; c.msg = bres.msgs.join(' '); c.open = bres.items.length === 1 ? 0 : -1;
+    if (c.tab === 'search') renderAdd();
+    return;
+  }
   var lq = q.toLowerCase();
   var res = await Promise.allSettled([cached('u:' + lq, function () { return searchUsda(q); }),
     $('useBrand').checked ? cached('b:' + lq, function () { return searchBranded(q); }) : Promise.resolve([])]);
@@ -1315,6 +1552,7 @@ $('sheetPane').addEventListener('click', function (e) {
   if (d.ltype) { c.ltype = d.ltype; updateLabelOut(); return; }
   var a = d.aact;
   if (a === 'search') { addSearch(); return; }
+  if (a === 'scan') { openScanner(function (code) { if (addCtx !== c) return; c.tab = 'search'; c.v.aq = code; renderAdd(); $('aq').value = code; addSearch(); }); return; }
   if (a === 'addfood' || a === 'addrecent') {
     g = parseFloat($('ag').value); if (!(g > 0)) { $('ag').focus(); return; }
     var f = a === 'addfood' ? c.foods[c.open] : c.recent[c.rOpen]; if (!f) return;
