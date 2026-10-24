@@ -134,7 +134,8 @@ a{color:var(--ac)}
 .chip.c-green.on{background:var(--g);border-color:var(--g);color:#fff}
 .chip.c-yellow.on{background:var(--y);border-color:var(--y);color:#1d2125}
 .chip.c-orange.on{background:var(--o);border-color:var(--o);color:#fff}
-b.c-green{color:#2e7d32} b.c-yellow{color:#8a6d00} b.c-orange{color:#c25400}
+b.c-green{color:#2e7d32} b.c-yellow{color:#8a6d00} b.c-orange{color:#c25400} b.c-none{color:#5d6670}
+.mfc{font-size:13px}
 /* barcode scanner */
 .scan{position:fixed;inset:0;z-index:300;background:#000;display:none;color:#fff;overflow:hidden}
 .scan.on{display:block}
@@ -161,7 +162,7 @@ b.c-green{color:#2e7d32} b.c-yellow{color:#8a6d00} b.c-orange{color:#c25400}
 <body>
 <header>
   <h1>My Food Colors</h1>
-  <p>Green / yellow / orange by calorie density. Personal tool, not affiliated with Noom. <span id="appVer">v7</span></p>
+  <p>Green / yellow / orange by calorie density. Personal tool, not affiliated with Noom. <span id="appVer">v7.1</span></p>
 </header>
 <main>
 <!-- LOOKUP -->
@@ -1641,6 +1642,18 @@ function cleanMyFood(f) {
 function myFoodProfile(mf) { return {unit: mf.unit, por: mf.por || ((memOf(mf) || {}).p) || [], ft: mf.ft || (mf.unit === 'mL' ? 'drink' : null), kcal100: mf.kcal100, name: mf.name, fid: mf.fid}; }
 function myFoodAmt(mf) { return mf.amt && mf.amt.u ? {q: mf.amt.q, u: mf.amt.u} : {q: mf.grams, u: baseU(mf)}; }
 function myFoodColor(mf) { var o = findOv(mf.fid, mf.name); return {c: o ? o.c : mf.color, you: !!o}; }
+function colorWord(c) { return c === 'none' ? 'No color' : cap(c); }
+// "Always count as" chips for My foods (same overrides as Lookup / Today, so they apply everywhere)
+function mfOvHtml(mf, cur) {
+  return '<div class="muted" style="margin-top:10px">Color</div><div class="seg" id="mfOvSeg" data-base="' + mf.color + '">' + ovChips(cur, 'data-leov') + '</div>' +
+    '<div class="muted" style="font-size:12px">Auto = ' + colorWord(mf.color) + ' by the color rules. Pick a color to always count this food that way (also listed under Targets → Your color choices).</div>';
+}
+function mfOvPicked(c0) { var b = document.querySelector('#mfOvSeg .chip.on'); return b ? b.dataset.leov : c0; }
+// set or clear her color choice for a saved food; rename moves an existing choice to the new name
+function mfSetOv(fid, oldName, newName, c) {
+  if (oldName && normName(oldName) !== normName(newName)) setOv(fid, oldName, 'auto');
+  return setOv(fid, newName, c);
+}
 function findMyFood(l, id) { for (var i = 0; i < l.length; i++) if (l[i].id === id) return i; return -1; }
 function findMyFoodDup(l, f, exceptId) {
   for (var i = 0; i < l.length; i++) { var x = l[i]; if (x.id === exceptId) continue; if ((f.fid && x.fid && f.fid === x.fid) || normName(x.name) === normName(f.name)) return i; }
@@ -1658,11 +1671,12 @@ function offerMyFood(raw, back) {
   if (!(num(raw.kcal100) >= 0)) { alert('Enter the calories first.'); return; }
   if (back) { AVALS.forEach(function (k) { if ($(k)) back.v[k] = $(k).value; }); addCtx = null; $('sheetPane').classList.remove('tall'); }
   var f = cleanMyFood(raw), l = getMyFoods(), di = findMyFoodDup(l, f), oc = myFoodColor(f);
-  mfCtx = {food: f, back: back || null, dup: di >= 0 ? l[di].id : null};
+  mfCtx = {food: f, back: back || null, dup: di >= 0 ? l[di].id : null, c0: (findOv(f.fid, f.name) || {}).c || 'auto'};
   openSheet('<div class="mhead"><h2 id="mfTitle">Save to My foods</h2><button class="xbtn" data-pick="__cancel" aria-label="Close" style="font-size:22px">✕</button></div>' +
-    '<div class="row" style="margin-top:4px"><span class="pill ' + oc.c + '">' + (oc.c === 'none' ? 'no color' : oc.c) + '</span><span class="muted">' + r0(f.kcal100) + ' kcal / 100 ' + f.unit + (oc.you ? ' · your color choice' : '') + '</span></div>' +
+    '<div class="row" style="margin-top:4px"><span class="pill ' + oc.c + '" id="mfPill">' + (oc.c === 'none' ? 'no color' : oc.c) + '</span><span class="muted">' + r0(f.kcal100) + ' kcal / 100 ' + f.unit + (oc.you ? ' · your color choice' : '') + '</span></div>' +
     '<div class="muted" style="margin-top:10px">Name</div><div class="row"><input id="mfName" type="text" class="grow" maxlength="80" value="' + esc(f.name) + '"></div>' +
     '<div class="muted" style="margin-top:8px">Usual amount: <b>' + esc(amtText(f)) + ' · ' + fmtN(itemKcal(f)) + ' kcal</b> <span class="muted">(change it any time)</span></div>' +
+    mfOvHtml(f, (findOv(f.fid, f.name) || {}).c || 'auto') +
     (di >= 0 ? '<div class="why" id="mfDup" style="margin-top:8px">You already saved "' + esc(l[di].name) + '" (' + esc(amtText(l[di])) + '). Saving again updates it with this version.</div>' : '') +
     '<div class="row" style="margin-top:12px"><button class="btn pri" data-pick="__mfsave">' + (di >= 0 ? 'Update my saved food' : 'Save') + '</button><button class="btn" data-pick="__cancel">Cancel</button></div>');
 }
@@ -1673,8 +1687,11 @@ function saveMyFoodFromSheet() {
   var f = Object.assign({}, c.food, {name: nm}), l = getMyFoods(), di = c.dup ? findMyFood(l, c.dup) : -1, updated = false;
   if (di < 0) di = findMyFoodDup(l, f);
   if (di >= 0) { f.id = l[di].id; f.created = l[di].created; if (!f.sec && l[di].sec) f.sec = l[di].sec; l[di] = f; updated = true; } else l.unshift(f);
-  saveMyFoods(l); renderMyFoods();
-  var msg = (updated ? 'Updated "' : 'Saved "') + f.name + '" in My foods';
+  var nc = mfOvPicked(c.c0), o = null, ovChanged = nc !== c.c0 || (nc !== 'auto' && normName(nm) !== normName(c.food.name));
+  if (ovChanged) o = mfSetOv(f.fid, c.food.name, f.name, nc);
+  saveMyFoods(l); renderMyFoods(); renderOvList();
+  var msg = (updated ? 'Updated "' : 'Saved "') + f.name + '" in My foods' + (ovChanged ? (o ? ' · always ' + o.c : ' · automatic color') : '');
+  if (o) { var rc = retroCounts(o); if (rc.today || rc.past || rc.meals) { mfCtx = null; offerRetro(o); return; } }
   if (c.back) mfBack(); else closeSheet();
   toast(msg);
 }
@@ -1696,7 +1713,7 @@ function renderMyFoods() {
   if (!l.length) { el.innerHTML = '<p class="muted" style="margin:0">Nothing saved yet. On Lookup or Label tap "☆ My foods", or tap a food on Today and choose "Save to My foods".</p>'; return; }
   el.innerHTML = l.map(function (mf) {
     var id = esc(mf.id), oc = myFoodColor(mf);
-    var row = '<div class="mi" data-mfrow="' + id + '"><span class="dot ' + oc.c + '"></span><span class="nm">' + esc(mf.name) + (oc.you ? YOU : '') + '<br><span class="muted">' + esc(amtText(mf)) + ' · ' + fmtN(itemKcal(mf)) + ' kcal' + (mf.sec ? ' · ' + SEC_LABEL[mf.sec] : '') + '</span></span>' +
+    var row = '<div class="mi" data-mfrow="' + id + '"><span class="dot ' + oc.c + '"></span><span class="nm">' + esc(mf.name) + (oc.you ? YOU : '') + '<br><b class="mfc c-' + oc.c + '">' + colorWord(oc.c) + '</b> <span class="muted">· ' + esc(amtText(mf)) + ' · ' + fmtN(itemKcal(mf)) + ' kcal' + (mf.sec ? ' · ' + SEC_LABEL[mf.sec] : '') + '</span></span>' +
       '<button class="btn sm pri" data-mfa="open" data-id="' + id + '">+ Log</button>' +
       '<button class="ibtn" data-mfa="edit" data-id="' + id + '" aria-label="Edit ' + esc(mf.name) + '">✎</button>' +
       '<button class="xbtn" data-mfa="del" data-id="' + id + '" aria-label="Remove ' + esc(mf.name) + '">✕</button></div>';
@@ -1734,10 +1751,11 @@ $('myFoodList').addEventListener('click', function (e) {
 var mfeCtx = null;
 function openMyFoodEdit(id) {
   var l = getMyFoods(), mf = l[findMyFood(l, id)]; if (!mf) return;
-  mfeCtx = {id: id}; var oc = myFoodColor(mf);
+  var ov0 = findOv(mf.fid, mf.name); mfeCtx = {id: id, c0: ov0 ? ov0.c : 'auto', name0: mf.name}; var oc = myFoodColor(mf);
   openSheet('<div class="mhead"><h2 id="mfeTitle">Edit saved food</h2><button class="xbtn" data-pick="__cancel" aria-label="Close" style="font-size:22px">✕</button></div>' +
-    '<div class="row" style="margin-top:4px"><span class="pill ' + oc.c + '">' + (oc.c === 'none' ? 'no color' : oc.c) + '</span><span class="muted">' + r0(mf.kcal100) + ' kcal / 100 ' + mf.unit + (oc.you ? ' · your color choice' : '') + '</span></div>' +
+    '<div class="row" style="margin-top:4px"><span class="pill ' + oc.c + '" id="mfPill">' + (oc.c === 'none' ? 'no color' : oc.c) + '</span><span class="muted">' + r0(mf.kcal100) + ' kcal / 100 ' + mf.unit + (oc.you ? ' · your color choice' : '') + '</span></div>' +
     '<div class="muted" style="margin-top:10px">Name</div><div class="row"><input id="mfeName" type="text" class="grow" maxlength="80" value="' + esc(mf.name) + '"></div>' +
+    mfOvHtml(mf, mfeCtx.c0) +
     '<div class="muted" style="margin-top:10px">Usual amount</div>' + amtHtml('mfe', myFoodProfile(mf), myFoodAmt(mf), 'mfeQ', 'mfeU') +
     '<div class="row" style="margin-top:10px"><span class="muted">Usually for</span><select id="mfeSec"><option value="">Any section</option>' +
     SECS.map(function (x) { return '<option value="' + x + '"' + (mf.sec === x ? ' selected' : '') + '>' + SEC_LABEL[x] + '</option>'; }).join('') + '</select></div>' +
@@ -1753,8 +1771,13 @@ function saveMyFoodEdit() {
   mf.name = nm; mf.grams = Math.round(r.grams * 10) / 10;
   if (r.amt.u === baseU(mf)) delete mf.amt; else mf.amt = r.amt;
   var sv = $('mfeSec').value; if (SECS.indexOf(sv) >= 0) mf.sec = sv; else delete mf.sec;
-  l[i] = cleanMyFood(mf); saveMyFoods(l); closeSheet(); renderMyFoods();
-  toast('Saved: ' + mf.name + ' · ' + amtText(l[i]));
+  l[i] = cleanMyFood(mf); saveMyFoods(l);
+  var nc = mfOvPicked(c.c0), renamed = normName(c.name0) !== normName(nm), o = null, changed = nc !== c.c0;
+  if (changed || (renamed && nc !== 'auto')) o = mfSetOv(mf.fid, c.name0, nm, nc);
+  renderMyFoods(); renderOvList(); renderMeals(); renderToday();
+  if (changed && o) { mfeCtx = null; offerRetro(o); return; }   // same "Update foods already logged?" step as elsewhere
+  closeSheet();
+  toast(changed ? 'Back to automatic color for "' + nm + '" (' + colorWord(l[i].color) + ')' : 'Saved: ' + mf.name + ' · ' + amtText(l[i]));
 }
 // "+ Add" sheet → My foods
 function addMyFoodsHtml() {
@@ -2294,6 +2317,7 @@ $('ovList').addEventListener('click', function (e) {
 $('sheetPane').addEventListener('click', function (e) {
   var s = e.target.closest('[data-lesec],[data-leov]'); if (!s) return;
   [].forEach.call(s.parentNode.children, function (c) { c.classList.toggle('on', c === s); });
+  if (s.parentNode.id === 'mfOvSeg' && $('mfPill')) { var pc = s.dataset.leov === 'auto' ? s.parentNode.dataset.base : s.dataset.leov; $('mfPill').className = 'pill ' + pc; $('mfPill').textContent = pc === 'none' ? 'no color' : pc; }
 });
 
 // ---------- backup / restore ----------
